@@ -3,22 +3,21 @@ on:
   workflow_call:
   workflow_dispatch:
 env:
-  PYTHON_VERSION: "3" # Only 2(Ubuntu 22.04) or 3(Any OS Versions).
-  PACK_METHOD: "Anykernel3" # Anykernel3 need SOURCE and BRANCH, MKBOOTIMG needn't it.
-  KERNELSU_METHOD: "only" # shell, manual and only.
-  PATCHES_SOURCE: "JackA1ltman/NonGKI_Kernel_Patches" # [your_name]/[your_patch] -> gooder123/NonGKI_Patcher
-  PATCHES_BRANCH: "mi_kernel" # [your_branch] -> main
-  HOOK_METHOD: "normal" # manual hook method,can choice syscall and normal.
-  PROFILE_NAME: "star_hyper_a14.env" # your profile name.
-  KERNELSU_SUS_PATCH: "false" # if u need manual susfs patch to kernelsu.
-  KPM_ENABLE: "false" # Only use it for SukiSU-Ultra.
-  KPM_PATCH_SOURCE: "" # patch exec file source -> raw.githubusercontent.com/Test/Test/patch .
-  GENERATE_DTB: "false" # if u kernel need DTB , but cannot auto generate it. (Only Anykernel3).
-  GENERATE_CHIP: "qcom" # only supported for qcom and mediatek.
-  BUILD_DEBUGGER: "false" # Output build errors.
-  BUILD_OTHER_CONFIG: "true" # Merge config files.
-  FREE_MORE_SPACE: "false"
-
+  PYTHON_VERSION: "3"
+  PACK_METHOD: "Anykernel3"
+  KERNELSU_METHOD: "only"
+  PATCHES_SOURCE: "JackA1ltman/NonGKI_Kernel_Patches"
+  PATCHES_BRANCH: "mi_kernel"
+  HOOK_METHOD: "normal"
+  PROFILE_NAME: "star_hyper_a14.env"
+  KERNELSU_SUS_PATCH: "false"
+  KPM_ENABLE: "false"
+  KPM_PATCH_SOURCE: ""
+  GENERATE_DTB: "false"
+  GENERATE_CHIP: "qcom"
+  BUILD_DEBUGGER: "false"
+  BUILD_OTHER_CONFIG: "true"
+  FREE_MORE_SPACE: "true"
 
 jobs:
   build:
@@ -62,9 +61,7 @@ jobs:
               HAVE_NO_DTBO
               HAVE_NO_DTBO_TOOL
               ROM_TEXT
-
           )
-
           for CONFIG in "${CONFIG_LIST[@]}"; do
               if [[ "$CONFIG" == "EXTRA_CMDS" || "$CONFIG" == "CUSTOM_CMDS" ]]; then
                   echo "$CONFIG=$(grep -w "$CONFIG" "$CONFIG_ENV" | head -n 1 | cut -d ":" -f 2)" >> $GITHUB_ENV
@@ -72,49 +69,45 @@ jobs:
                   echo "$CONFIG=$(grep -w "$CONFIG" "$CONFIG_ENV" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
               fi
           done
-
-          # Move patch folder to tmp
           mv $GITHUB_WORKSPACE/Patches /tmp/
 
-      - name: Free Disk Space (Ubuntu)
-        if: env.FREE_MORE_SPACE == 'true'
+      - name: Free Disk Space (Full Clean)
         uses: jlumbroso/free-disk-space@main
         with:
-          # this might remove tools that are actually needed,
-          # if set to "true" but frees about 6 GB
           tool-cache: true
-
-          # all of these default to true, but feel free to set to
-          # "false" if necessary for your workflow
-          android: false
+          android: true
           dotnet: true
           haskell: true
           large-packages: true
           docker-images: true
           swap-storage: true
 
-      - name: Remove useless tools
-        run: |
-          sudo rm -rf /opt/hostedtoolcache
-          df -h
-
-      - name: Maximize build space
+      - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 2048
-          temp-reserve-mb: 64
+          root-reserve-mb: 4096
+          temp-reserve-mb: 128
           swap-size-mb: 8192
           remove-dotnet: "true"
           remove-android: "true"
           remove-haskell: "true"
           remove-codeql: "true"
+          remove-docker-images: "true"
+
+      - name: Delete Extra Files
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /var/lib/docker /etc/docker \
+                      /opt/hostedtoolcache/*
+          sudo apt clean
+          sudo apt autoremove -y
+          df -h
 
       - name: Install necessary packages
         run: |
           lsb_release -a
           UBUNTU_VERSION=$(lsb_release -sr)
           sudo apt-get update
-
           if [ $UBUNTU_VERSION == "22.04" ] || [ $UBUNTU_VERSION == "20.04" ]; then
             sudo apt-get install git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler
             sudo apt-get install p7zip p7zip-full -y
@@ -147,8 +140,6 @@ jobs:
       - name: Set Compile Environment
         run: |
           cd $GITHUB_WORKSPACE
-
-          # Set GCC Aarch64
           if [ "${{ env.CLANG_SOURCE }}" == *proton* ]; then
             echo "Detected Proton Clang. Not use GCC Source."
             GCC_64_BIN=aarch64-linux-gnu-
@@ -172,8 +163,6 @@ jobs:
             GCC_64_BIN=aarch64-linux-android-
             echo "GCC_64=CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-64/bin/$GCC_64_BIN" >> $GITHUB_ENV
           fi
-
-          # Set GCC ARM32
           if [ "${{ env.CLANG_SOURCE }}" == *proton* ]; then
             echo "Detected Proton Clang. Not use GCC Source."
             GCC_32_BIN=arm-linux-gnueabi-
@@ -197,8 +186,6 @@ jobs:
             GCC_32_BIN=arm-linux-androideabi-
             echo "GCC_32=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/gcc-32/bin/$GCC_32_BIN" >> $GITHUB_ENV
           fi
-
-          # Set Clang
           if [[ "${{ env.CLANG_SOURCE }}" == *".git" ]]; then
             git clone ${{ env.CLANG_SOURCE }} -b ${{ env.CLANG_BRANCH }} clang-custom --depth=1
           elif [[ "${{ env.CLANG_SOURCE }}" == *'.tar.gz' ]]; then
@@ -229,8 +216,8 @@ jobs:
           git clone --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_BRANCH }} device_kernel --depth=1
           if [[ -n "${{ env.DEFCONFIG_SOURCE }}" ]]; then
             wget ${{ env.DEFCONFIG_SOURCE }} -O device_kernel/arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          elif [[ -n "${{ env.DEFCONFIG_ORIGIN_DEFCONFIG }}" ]]; then
-            wget ${{ env.DEFCONFIG_ORIGIN_DEFCONFIG }} -O $GITHUB_WORKSPACE/device_kernel/Image
+          elif [[ -n "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" ]]; then
+            wget ${{ env.DEFCONFIG_ORIGIN_IMAGE }} -O $GITHUB_WORKSPACE/device_kernel/Image
             $GITHUB_WORKSPACE/device_kernel/scripts/extract-ikconfig $GITHUB_WORKSPACE/device_kernel/Image > $GITHUB_WORKSPACE/device_kernel/arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           fi
           echo "KERNEL_VERSION=$(head -n 3 device_kernel/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')" >> $GITHUB_ENV
@@ -258,19 +245,16 @@ jobs:
             echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           fi
           if [[ "${{ env.LXC_ENABLE }}" == "true" ]]; then
-           echo "CONFIG_VIRTUALIZATION=y" >> android-kernel/arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-           echo "CONFIG_KVM=y" >> android-kernel/arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-           echo "CONFIG_VHOST_NET=y" >> android-kernel/arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-           echo "CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y" >> android-kernel/arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+           echo "CONFIG_VIRTUALIZATION=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+           echo "CONFIG_KVM=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+           echo "CONFIG_VHOST_NET=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+           echo "CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           fi
 
       - name: Set Pack Method and KernelSU and SUSFS
         run: |
-          # Variable
           SUSFS_SOURCE=https://gitlab.com/simonpunk/susfs4ksu.git
           SUSFS_BRANCH=kernel-${{ env.KERNEL_VERSION }}
-
-          # Set ${{ env.PACK_METHOD }} and KernelSU
           if [[ ${{ env.PACK_METHOD }} == "Anykernel3" ]]; then
             cd $GITHUB_WORKSPACE/device_kernel
             if [[ -d "Anykernel3" ]]; then
@@ -287,29 +271,28 @@ jobs:
             false
           fi
           echo "PACK_METHOD=${{ env.PACK_METHOD }}" >> $GITHUB_ENV
-
           if [[ ${{ env.KERNELSU_METHOD }} == "shell" ]]; then
             if [[ "${{ env.KERNELSU_SOURCE }}" != *".sh" ]]; then
-                echo "You need to provide a link ending with .sh, not one ending with .git or any other extension !"
+                echo "You need to provide a link ending with .sh!"
                 false
             else
                 curl -sSL ${{ env.KERNELSU_SOURCE }} | bash -s ${{ env.KERNELSU_BRANCH }}
             fi
           elif [[ ${{ env.KERNELSU_METHOD }} == "manual" ]]; then
             if [[ "${{ env.KERNELSU_SOURCE }}" != *".git" ]]; then
-                echo "You need to provide a link ending with .git, not one ending with .sh or any other extension !"
+                echo "You need to provide a link ending with .git!"
                 false
             else
                 rm -rf KernelSU && rm -rf KernelSU-Next
                 git clone ${{ env.KERNELSU_SOURCE }} -b ${{ env.KERNELSU_BRANCH }} ${{ env.KERNELSU_NAME }}
                 ln -sf "$(realpath --relative-to="$GITHUB_WORKSPACE/device_kernel/drivers" "$GITHUB_WORKSPACE/device_kernel/${{ env.KERNELSU_NAME }}/kernel")" "kernelsu"
                 grep -q "kernelsu" "$GITHUB_WORKSPACE/device_kernel/drivers/Makefile" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> $GITHUB_WORKSPACE/device_kernel/drivers/Makefile
-                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/device_kernel/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/device_kernel/drivers/Kconfig"
+                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/device_kernel/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" >> $GITHUB_WORKSPACE/device_kernel/drivers/Kconfig
                 echo "KernelSU Settings done."
             fi
           elif [[ ${{ env.KERNELSU_METHOD }} == "only" ]];then
             if [[ "${{ env.KERNELSU_SOURCE }}" != *".git" ]]; then
-                echo "You need to provide a link ending with .git, not one ending with .sh or any other extension !"
+                echo "You need to provide a link ending with .git!"
                 false
             else
                 rm -rf *KernelSU* && rm -rf drivers/kernelsu
@@ -323,8 +306,6 @@ jobs:
           echo "KERNELSU_METHOD=${{ env.KERNELSU_METHOD }}" >> $GITHUB_ENV
           KSU_VERSION=$(cd ${{ env.KERNELSU_NAME }} && expr $(/usr/bin/git rev-list --count HEAD) + 10200)
           echo "UPLOADNAME=-${{ env.KERNELSU_NAME }}_$KSU_VERSION" >> $GITHUB_ENV
-
-          ## KPM Checker
           if [[ -d "${{ env.KERNELSU_NAME }}/kernel/kpm" ]]; then
             if [ -f "include/linux/set_memory.h" ] && [ "${{ env.KPM_ENABLE }}" == "true" ]; then
                 echo "CONFIG_KPM=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
@@ -337,8 +318,6 @@ jobs:
                 echo "Doesn't enable KPM !"
             fi
           fi
-
-          # Set SUSFS
           if [[ "${{ env.SUSFS_ENABLE }}" == true ]]; then
             if [[ "${{ env.SUSFS_FIXED }}" == true ]]; then
               if [ -z "${{ env.PATCHES_SOURCE }}" ] || [ -z "${{ env.PATCHES_BRANCH }}" ]; then
@@ -348,7 +327,7 @@ jobs:
                 echo "Please do not set a full URL in PATCH_SOURCE!"
                 false
               else
-                git clone https://github.com/${{ env.PATCHES_SOURCE }}.git -b ${{ env.PATCHES_BRANCH }} NonGKI_Kernel_Patches --depth=1 # It's not necessary.
+                git clone https://github.com/${{ env.PATCHES_SOURCE }}.git -b ${{ env.PATCHES_BRANCH }} NonGKI_Kernel_Patches --depth=1
               fi
             fi
             git clone $SUSFS_SOURCE -b $SUSFS_BRANCH susfs4ksu --depth=1
@@ -380,8 +359,8 @@ jobs:
                       echo "your kernel needn't backport patch."
                   fi
               else
-                  echo "Cannot found normal_patches.sh in build project , please check u file existed in build project !"
-                  false
+                echo "Cannot found normal_patches.sh!"
+                false
               fi
             elif [[ ${{ env.HOOK_METHOD }} == "syscall" ]]; then
               if [[ -f "/tmp/Patches/syscall_hook_patches.sh" ]]; then
@@ -397,8 +376,8 @@ jobs:
                       echo "your kernel needn't backport patch."
                   fi
               else
-                  echo "Cannot found syscall_hook_patches.sh in build project , please check u file existed in build project !"
-                  false
+                echo "Cannot found syscall_hook_patches.sh!"
+                false
               fi
             else
               echo "please input vaild option!"
@@ -408,22 +387,15 @@ jobs:
 
       - name: Extra Kernel Options
         run: |
-          # Only ${{ env.DEVICE_NAME }} use it.
           cd $GITHUB_WORKSPACE/device_kernel
-          # echo "CONFIG_CPU_BIG_ENDIAN=n" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          # echo "CONFIG_COMPAT_VDSO=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          # echo "CONFIG_LTO_NONE=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          # echo "CONFIG_INIT_STACK_NONE=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          # sed -i 's/# CONFIG_SECCOMP is not set/CONFIG_SECCOMP=y/' ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
 
-      - name: Added mkdtboimg to kernel (Experiment)
+      - name: Added mkdtboimg to kernel
         if: env.HAVE_NO_DTBO == 'true' && env.HAVE_NO_DTBO_TOOL != 'true'
         run: |
           cd $GITHUB_WORKSPACE/device_kernel/scripts/dtc
           wget https://android.googlesource.com/platform/system/libufdt/+archive/refs/heads/main/utils/src.tar.gz
           tar zxvf src.tar.gz
           rm -f src.tar.gz
-
           cd $GITHUB_WORKSPACE/device_kernel
           cp /tmp/Patches/temp_dtbo.patch ./
           patch -p1 < temp_dtbo.patch
@@ -432,45 +404,35 @@ jobs:
           sed -i '/KBUILD_DTBS\t:= dtbs/a \#DTBO\nKBUILD_DTBO_IMG := dtbo.img' ./arch/arm64/Makefile
           sed -i '/dtc-tmp = $(subst $(comma),_,$(dot-target)\.dts\.tmp)/a \#DTBO\n# mkdtimg\n#----------------------------------------------------------------------------\nquiet_cmd_mkdtimg = DTBOIMG $@\ncmd_mkdtimg = python3 $(srctree)\/scripts\/dtc\/mkdtboimg.py create $@ --page_size=4096 $(filter-out FORCE,$^)' ./scripts/Makefile.lib
 
-      - name: Setup LXC (Experiment)
+      - name: Setup LXC
         if: env.LXC_ENABLE == 'true'
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
           rm -rf lxc
           git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git lxc
           echo 'source "lxc/Kconfig"' >> "Kconfig"
-
           echo "CONFIG_DOCKER=y" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-
           sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-
-          #sed -i '/CONFIG_LOCALVERSION/d' ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          #echo 'CONFIG_LOCALVERSION="-LXC"' >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-
           chmod +x $GITHUB_WORKSPACE/device_kernel/lxc/runcpatch.sh
           if [ -f $GITHUB_WORKSPACE/device_kernel/kernel/cgroup/cgroup.c ]; then
               sh $GITHUB_WORKSPACE/device_kernel/lxc/runcpatch.sh $GITHUB_WORKSPACE/device_kernel/kernel/cgroup/cgroup.c
           fi
-
           if [ -f $GITHUB_WORKSPACE/device_kernel/kernel/cgroup.c ]; then
               sh $GITHUB_WORKSPACE/device_kernel/lxc/runcpatch.sh $GITHUB_WORKSPACE/device_kernel/kernel/cgroup.c
           fi
-
           if [ -f $GITHUB_WORKSPACE/device_kernel/net/netfilter/xt_qtaguid.c ]; then
               patch -p0 < $GITHUB_WORKSPACE/device_kernel/lxc/xt_qtaguid.patch
           fi
-
           echo "LXC_ENABLE=lxc" >> $GITHUB_ENV
 
       - name: Patch Kernel of SUSFS
         if: env.SUSFS_ENABLE == 'true'
         run: |
           cd $GITHUB_WORKSPACE/device_kernel/
+          KERNEL_VERSION=${{ env.KERNEL_VERSION }}
           cp susfs4ksu/kernel_patches/50_add_susfs_in_kernel-$KERNEL_VERSION.patch ./
-
-          patch -p1 < 50_add_susfs_in_kernel-${{ env.KERNEL_VERSION }}.patch || true
-
+          patch -p1 < 50_add_susfs_in_kernel-$KERNEL_VERSION.patch || true
           if [[ "${{ env.KERNELSU_NAME }}"  == "KernelSU-Next" ]]; then
             if [[ "${{ env.KERNELSU_SOURCE }}" =~ ".sh" && "${{ env.KERNELSU_BRANCH }}" =~ "susfs" ]]; then
                 echo "KernelSU-Next SuSFS Branch detected!"
@@ -505,7 +467,6 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/device_kernel/
           cp NonGKI_Kernel_Patches/mi11u_hyperos/hyperos_a14_fixed.patch ./
-
           patch -p1 < hyperos_a14_fixed.patch || true
 
       - name: Setup ccache
@@ -556,13 +517,11 @@ jobs:
             fi
             make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 ${{ env.CUSTOM_CMDS }} ${{ env.EXTRA_CMDS }} ${{ env.GCC_64 }} ${{ env.GCC_32 }}
           fi
-
-          ## Generate DTBO
           if [ "${{ env.HAVE_NO_DTBO }}" == "true" ] && [ "${{ env.HAVE_NO_DTBO_TOOL }}" == "true" ]; then
             cd $GITHUB_WORKSPACE/device_kernel
             mkdir dtbo_tool
             cd dtbo_tool
-            wget https://android.googlesource.com/platform/system/libufdt/+archive/master/utils.tar.gz -o mkdtboimg.tar.gz
+            wget https://android.googlesource.com/platform/system/libufdt/+archive/master/utils.tar.gz -O mkdtboimg.tar.gz
             tar zxvf mkdtboimg.tar.gz
             cd ../
             if [ -d "$GITHUB_WORKSPACE/device_kernel/out/arch/arm64/boot/dts/vendor" ]; then
@@ -572,12 +531,11 @@ jobs:
             fi
           fi
 
-      - name: KPM Patcher (Experiment)
+      - name: KPM Patcher
         if: env.KPM_ENABLE == 'true'
         run: |
           cd $GITHUB_WORKSPACE/device_kernel/
           IMAGE_DIR="$GITHUB_WORKSPACE/device_kernel/out/arch/arm64/boot"
-
           if [[ -f "$IMAGE_DIR/Image.gz-dtb" ]]; then
               MODE="gz-dtb"
           elif [[ -f "$IMAGE_DIR/Image.gz" ]]; then
@@ -585,10 +543,9 @@ jobs:
           elif [[ -f "$IMAGE_DIR/Image" ]]; then
               MODE="plain"
           else
-              echo "No valid Image file found."
-              exit 1
+            echo "No valid Image file found."
+            exit 1
           fi
-
           case "$MODE" in
             gz-dtb)
               if [ -f "include/linux/set_memory.h" ]; then
@@ -613,10 +570,10 @@ jobs:
                       cat Image.gz vendor/dts/${{ env.GENERATE_CHIP }}/*.dtb > Image.gz-dtb
                       echo "Hook Image successfully !"
                   else
-                      echo "Not found dts folder, abort."
+                    echo "Not found dts folder, abort."
                   fi
               else
-                  echo "Not supported for your kernel !"
+                echo "Not supported for your kernel !"
               fi
               ;;
             gz)
@@ -643,11 +600,8 @@ jobs:
         run: |
           IMAGE_DIR="$GITHUB_WORKSPACE/device_kernel/out/arch/arm64/boot"
           TIME=$(date +"%Y%m%d%H%M%S")
-
           cd $GITHUB_WORKSPACE/device_kernel/
-
           mkdir -p tmp
-
           if [[ "${{ env.AK3_SOURCE }}" =~ "osm0sis" ]]; then
             sed -i 's/do.devicecheck=1/do.devicecheck=0/g' Anykernel3/anykernel.sh
             sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' Anykernel3/anykernel.sh
@@ -656,7 +610,6 @@ jobs:
           else
             echo "Now using custom Anykernel3."
           fi
-
           if [[ -f "$IMAGE_DIR/Image.gz-dtb" ]]; then
             cp -fp $IMAGE_DIR/Image.gz-dtb tmp
             echo "Found Image.gz-dtb !"
@@ -664,19 +617,15 @@ jobs:
             cp -fp $IMAGE_DIR/Image.gz tmp
             echo "Found Image.gz !"
           elif [[ -f "$IMAGE_DIR/Image" ]]; then
-            # gzip -c $IMAGE_DIR/Image > $IMAGE_DIR/Image.gz
-            # cp -fp $IMAGE_DIR/Image.gz tmp
             cp -fp $IMAGE_DIR/Image tmp
             echo "Found Image !"
           fi
-
           cp -rp ./Anykernel3/* tmp
           cd tmp
           7za a -mx9 tmp.zip *
           cd ..
           cp -fp tmp/tmp.zip ${{ env.DEVICE_CODENAME }}-${{ env.ROM_TEXT }}-$TIME-${{ env.PACK_METHOD }}${{ env.LXC_STATUS }}.zip
           rm -rf tmp
-
           echo "PACK_NAME=${{ env.DEVICE_CODENAME }}-${{ env.ROM_TEXT }}-$TIME-${{ env.PACK_METHOD }}${{ env.LXC_STATUS }}.zip" >> $GITHUB_ENV
 
       - name: Make Latest Boot Image
@@ -686,9 +635,7 @@ jobs:
           IMAGE_DIR="$GITHUB_WORKSPACE/device_kernel/out/arch/arm64/boot"
           TIME=$(date +"%Y%m%d%H%M%S")
           FORMAT_MKBOOTING=$(echo `mkboottools/unpack_bootimg.py --boot_img=boot_source_${{ env.DEVICE_NAME }}.img --format mkbootimg`)
-
           mkboottools/unpack_bootimg.py --boot_img boot_source_${{ env.DEVICE_NAME }}.img
-
           if [[ -f "$IMAGE_DIR/Image.gz-dtb" ]]; then
             rm -f out/kernel
             cp -fp $IMAGE_DIR/Image.gz-dtb out/kernel
@@ -702,7 +649,6 @@ jobs:
             cp -fp $IMAGE_DIR/Image out/kernel
             echo "Found Image !"
           fi
-
           if [ -f "$IMAGE_DIR/dtb" ]; then
             echo "Found DTB!"
             cp -fp $IMAGE_DIR/dtb out/dtb
@@ -716,17 +662,14 @@ jobs:
                 cp -fp $IMAGE_DIR/DTB out/dtb
                 echo "Generated ${{ env.GENERATE_CHIP }} DTB."
             else
-                echo "Missing .dtb file in dts or dts/vendor ! Generate Failed !"
-                false
+              echo "Missing .dtb file! Generate Failed !"
+              false
             fi
           else
             echo "Doesn't found DTB! Your device maybe needn't the file."
           fi
-
           eval "mkboottools/mkbootimg.py $FORMAT_MKBOOTING -o ${{ env.DEVICE_CODENAME }}-${{ env.ROM_TEXT }}-$TIME-image${{ env.LXC_STATUS }}.img"
-
           echo "PACK_NAME=${{ env.DEVICE_CODENAME }}-${{ env.ROM_TEXT }}-$TIME-image${{ env.LXC_STATUS }}.img" >> $GITHUB_ENV
-
           rm -f $GITHUB_WORKSPACE/boot_source_${{ env.DEVICE_NAME }}.img
 
       - name: Upload Build Artifacts For Anykernel3
