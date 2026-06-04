@@ -62,9 +62,10 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      - name: Install BUILD Dependencies (SPEED UP)
+      - name: Install BUILD Dependencies (FIXED)
         run: |
-          sudo apt-get install -y -qq git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx1-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler p7zip-full python2 python3
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler p7zip-full python2 python3
           echo "OK"
 
       - name: Install GCC
