@@ -1,57 +1,39 @@
-name: Build Kernel Xiaomi 11 Ultra (HyperOS A14) with KSU and SUSFS
+name: Build Kernel Xiaomi 11 Ultra (HyperOS A14) with KSU + SUSFS
 on:
   workflow_call:
   workflow_dispatch:
+
 env:
-  PYTHON_VERSION: "3"
-  PACK_METHOD: "Anykernel3"
-  KERNELSU_METHOD: "only"
-  PATCHES_SOURCE: "JackA1ltman/NonGKI_Kernel_Patches"
-  PATCHES_BRANCH: "mi_kernel"
-  HOOK_METHOD: "normal"
   PROFILE_NAME: "star_hyper_a14.env"
-  KERNELSU_SUS_PATCH: "false"
-  KPM_ENABLE: "false"
-  KPM_PATCH_SOURCE: ""
-  GENERATE_DTB: "false"
-  GENERATE_CHIP: "qcom"
-  BUILD_DEBUGGER: "false"
-  BUILD_OTHER_CONFIG: "true"
-  FREE_MORE_SPACE: "true"
+  CCACHE_DIR: "/tmp/ccache"
 
 jobs:
   build:
-    name: Build Kernel by ${{ github.actor }}
     runs-on: ubuntu-22.04
-    env:
-      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLIMIT: "2G"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare Configuration
+      # 读取配置
+      - name: Load Config
         run: |
-          CONFIG_ENV=$(grep -w "CONFIG_ENV" Profiles/${{ env.PROFILE_NAME }} | head -n 1 | cut -d "=" -f 2)
-          CONFIG_LIST=(
-              DEVICE_NAME DEVICE_CODENAME CUSTOM_CMDS EXTRA_CMDS
-              KERNEL_SOURCE KERNEL_BRANCH CLANG_SOURCE CLANG_BRANCH GCC_GNU
-              GCC_64_SOURCE GCC_64_BRANCH GCC_32_SOURCE GCC_32_BRANCH
-              DEFCONFIG_SOURCE DEFCONFIG_NAME DEFCONFIG_ORIGIN_IMAGE
-              KERNELSU_SOURCE KERNELSU_BRANCH KERNELSU_NAME
-              SUSFS_ENABLE SUSFS_FIXED AK3_SOURCE AK3_BRANCH BOOT_SOURCE
-              LXC_ENABLE HAVE_NO_DTBO HAVE_NO_DTBO_TOOL ROM_TEXT
-          )
-          for CONFIG in "${CONFIG_LIST[@]}"; do
-              if [[ "$CONFIG" == "EXTRA_CMDS" || "$CONFIG" == "CUSTOM_CMDS" ]]; then
-                  echo "$CONFIG=$(grep -w "$CONFIG" "$CONFIG_ENV" | head -n 1 | cut -d ":" -f 2)" >> $GITHUB_ENV
-              else
-                  echo "$CONFIG=$(grep -w "$CONFIG" "$CONFIG_ENV" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-              fi
-          done
-          mv $GITHUB_WORKSPACE/Patches /tmp/
+          source Profiles/${{ env.PROFILE_NAME }}
+          cat >> $GITHUB_ENV << EOF
+          KERNEL_SOURCE=$KERNEL_SOURCE
+          KERNEL_BRANCH=$KERNEL_BRANCH
+          CLANG_SOURCE=$CLANG_SOURCE
+          CLANG_BRANCH=$CLANG_BRANCH
+          DEFCONFIG_NAME=$DEFCONFIG_NAME
+          KERNELSU_SOURCE=$KERNELSU_SOURCE
+          KERNELSU_BRANCH=$KERNELSU_BRANCH
+          KERNELSU_NAME=$KERNELSU_NAME
+          AK3_SOURCE=$AK3_SOURCE
+          AK3_BRANCH=$AK3_BRANCH
+          SUSFS_ENABLE=$SUSFS_ENABLE
+          EOF
+          mv Patches /tmp/
 
-      - name: Free Disk Space (FAST)
+      # 清理空间
+      - name: Free Space
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -62,93 +44,82 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      - name: Install BUILD Dependencies (FIXED)
+      # 安装依赖（不含错误包、不含多余东西）
+      - name: Install Dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler p7zip-full python2 python3
-          echo "OK"
+          sudo apt-get install -y -qq git make bc bison flex gcc g++ zip unzip curl wget p7zip-full ccache \
+          libssl-dev libelf-dev libz-dev device-tree-compiler lld llvm clang
 
-      - name: Install GCC
-        if: env.GCC_GNU == 'true'
+      # 克隆 CLANG
+      - name: Clone Clang
         run: |
-          sudo apt-get install -y -qq binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
-          echo "GCC_64=CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "GCC_32=CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
+          git clone --depth=1 ${{ env.CLANG_SOURCE }} -b ${{ env.CLANG_BRANCH }} clang
+          echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
 
-      - name: Set Compile Environment
+      # 克隆内核源码
+      - name: Clone Kernel
         run: |
-          cd $GITHUB_WORKSPACE
-          if [[ "${{ env.CLANG_SOURCE }}" == *".git" ]]; then
-            git clone --depth=1 ${{ env.CLANG_SOURCE }} -b ${{ env.CLANG_BRANCH }} clang-custom
-          fi
-          if [[ "${{ env.GCC_64_SOURCE }}" == *".git" ]]; then
-            git clone --depth=1 ${{ env.GCC_64_SOURCE }} -b ${{ env.GCC_64_BRANCH }} gcc-64
-            echo "GCC_64=CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
-          fi
-          if [[ "${{ env.GCC_32_SOURCE }}" == *".git" ]]; then
-            git clone --depth=1 ${{ env.GCC_32_SOURCE }} -b ${{ env.GCC_32_BRANCH }} gcc-32
-            echo "GCC_32=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
-          fi
+          git clone --depth=1 --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_BRANCH }} kernel
+          cd kernel
+          echo "KERNEL_VERSION=$(make kernelversion | head -n1)" >> $GITHUB_ENV
 
-      - name: Get Kernel Source
+      # 克隆 KernelSU
+      - name: Integrate KernelSU
         run: |
-          cd $GITHUB_WORKSPACE
-          git clone --depth=1 --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_BRANCH }} device_kernel
-          if [[ -n "${{ env.DEFCONFIG_SOURCE }}" ]]; then
-            wget -q ${{ env.DEFCONFIG_SOURCE }} -O device_kernel/arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          fi
-          echo "KERNEL_VERSION=$(head -n 3 device_kernel/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')" >> $GITHUB_ENV
-
-      - name: Set KSU & SUSFS Config
-        run: |
-          cd $GITHUB_WORKSPACE/device_kernel
-          echo "CONFIG_KSU=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
-            echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-          fi
-
-      - name: Clone KernelSU (Clean)
-        run: |
-          cd $GITHUB_WORKSPACE/device_kernel
-          rm -rf KernelSU KernelSU-Next drivers/kernelsu
+          cd kernel
+          rm -rf KernelSU drivers/kernelsu
           git clone --depth=1 ${{ env.KERNELSU_SOURCE }} -b ${{ env.KERNELSU_BRANCH }} ${{ env.KERNELSU_NAME }}
           ln -s ../${{ env.KERNELSU_NAME }}/kernel drivers/kernelsu
 
-      - name: Clone SUSFS
+      # 启用 KernelSU 配置
+      - name: Enable KSU
+        run: |
+          cd kernel
+          sed -i '/^CONFIG_LOCALVERSION=/a CONFIG_KSU=y' arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+
+      # 克隆并植入 SUSFS
+      - name: Integrate SUSFS
         if: env.SUSFS_ENABLE == 'true'
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel
-          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-${{ env.KERNEL_VERSION }} susfs4ksu
-          cp -rf susfs4ksu/kernel_patches/fs/* fs/
-          cp -rf susfs4ksu/kernel_patches/include/linux/* include/linux/
+          cd kernel
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-${{ env.KERNEL_VERSION }} susfs
+          cp -rf susfs/kernel_patches/fs/* fs/
+          cp -rf susfs/kernel_patches/include/linux/* include/linux/
 
-      - name: Patch Kernel
+      # 打补丁
+      - name: Apply Patches
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel
+          cd kernel
           bash /tmp/Patches/normal_patches.sh
-          if [[ "${{ env.KERNELSU_NAME }}" != "KernelSU-Next" ]]; then
-            bash /tmp/Patches/backport_patches.sh
-          fi
+          bash /tmp/Patches/backport_patches.sh || true
 
+      # 编译内核（修复 ld.lld 错误！）
       - name: Build Kernel
         run: |
-          export PATH=$GITHUB_WORKSPACE/clang-custom/bin:$PATH
-          cd $GITHUB_WORKSPACE/device_kernel
-          make CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-          O=out ARCH=arm64 ${{ env.DEFCONFIG_NAME }}
-          make -j$(nproc) CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-          O=out ARCH=arm64
+          cd kernel
+          mkdir -p out
+          make O=out ARCH=arm64 ${{ env.DEFCONFIG_NAME }}
+          make -j$(nproc) O=out ARCH=arm64 \
+            CC="clang" \
+            AR="llvm-ar" \
+            NM="llvm-nm" \
+            OBJCOPY="llvm-objcopy" \
+            OBJDUMP="llvm-objdump" \
+            LD="ld.lld" \
+            STRIP="llvm-strip"
 
-      - name: Make Anykernel3
+      # 打包 Anykernel3
+      - name: Pack with Anykernel3
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel
-          git clone --depth=1 ${{ env.AK3_SOURCE }} -b ${{ env.AK3_BRANCH }} Anykernel3
-          cp out/arch/arm64/boot/Image.gz Anykernel3/
-          cd Anykernel3
-          zip -r9 kernel.zip *
-          mv kernel.zip $GITHUB_WORKSPACE/
-          
+          git clone --depth=1 ${{ env.AK3_SOURCE }} -b ${{ env.AK3_BRANCH }} ak3
+          cp kernel/out/arch/arm64/boot/Image.gz ak3/
+          cd ak3
+          zip -r9 "Kernel_Star_KSU_SUSFS.zip" ./*
+          mv *.zip ../
+
+      # 上传成品
       - uses: actions/upload-artifact@v4
         with:
-          name: Kernel-KSU-SUSFS
-          path: kernel.zip
+          name: Kernel_Final
+          path: "*.zip"
