@@ -1,11 +1,6 @@
-name: Build Kernel Xiaomi 11 Ultra (HyperOS A14) with KSU + SUSFS
+name: Build Xiaomi 11 Ultra (star) Kernel - KSU + SUSFS
 on:
-  workflow_call:
   workflow_dispatch:
-
-env:
-  PROFILE_NAME: "star_hyper_a14.env"
-  CCACHE_DIR: "/tmp/ccache"
 
 jobs:
   build:
@@ -13,27 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 读取配置
-      - name: Load Config
-        run: |
-          source Profiles/${{ env.PROFILE_NAME }}
-          cat >> $GITHUB_ENV << EOF
-          KERNEL_SOURCE=$KERNEL_SOURCE
-          KERNEL_BRANCH=$KERNEL_BRANCH
-          CLANG_SOURCE=$CLANG_SOURCE
-          CLANG_BRANCH=$CLANG_BRANCH
-          DEFCONFIG_NAME=$DEFCONFIG_NAME
-          KERNELSU_SOURCE=$KERNELSU_SOURCE
-          KERNELSU_BRANCH=$KERNELSU_BRANCH
-          KERNELSU_NAME=$KERNELSU_NAME
-          AK3_SOURCE=$AK3_SOURCE
-          AK3_BRANCH=$AK3_BRANCH
-          SUSFS_ENABLE=$SUSFS_ENABLE
-          EOF
-          mv Patches /tmp/
-
-      # 清理空间
-      - name: Free Space
+      - name: Clean system space
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -44,82 +19,62 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # 安装依赖（不含错误包、不含多余东西）
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq git make bc bison flex gcc g++ zip unzip curl wget p7zip-full ccache \
-          libssl-dev libelf-dev libz-dev device-tree-compiler lld llvm clang
+          sudo apt-get install -y -qq git make bc bison flex build-essential curl wget zip unzip p7zip-full ccache lld llvm clang libssl-dev libelf-dev
 
-      # 克隆 CLANG
-      - name: Clone Clang
+      - name: Clone Clang toolchain
         run: |
-          git clone --depth=1 ${{ env.CLANG_SOURCE }} -b ${{ env.CLANG_BRANCH }} clang
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r498929.git -b lineage-20.0 clang
           echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
 
-      # 克隆内核源码
-      - name: Clone Kernel
+      - name: Clone kernel source
         run: |
-          git clone --depth=1 --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_BRANCH }} kernel
-          cd kernel
-          echo "KERNEL_VERSION=$(make kernelversion | head -n1)" >> $GITHUB_ENV
+          git clone --depth=1 --recursive https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git -b star-s-12.1 kernel
 
-      # 克隆 KernelSU
       - name: Integrate KernelSU
         run: |
           cd kernel
           rm -rf KernelSU drivers/kernelsu
-          git clone --depth=1 ${{ env.KERNELSU_SOURCE }} -b ${{ env.KERNELSU_BRANCH }} ${{ env.KERNELSU_NAME }}
-          ln -s ../${{ env.KERNELSU_NAME }}/kernel drivers/kernelsu
+          git clone --depth=1 https://github.com/tiann/KernelSU.git KernelSU
+          ln -s ../KernelSU/kernel drivers/kernelsu
 
-      # 启用 KernelSU 配置
-      - name: Enable KSU
+      - name: Enable KernelSU config
         run: |
           cd kernel
-          sed -i '/^CONFIG_LOCALVERSION=/a CONFIG_KSU=y' arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/star_defconfig
 
-      # 克隆并植入 SUSFS
-      - name: Integrate SUSFS
-        if: env.SUSFS_ENABLE == 'true'
+      - name: Apply kernel patches
         run: |
           cd kernel
-          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-${{ env.KERNEL_VERSION }} susfs
-          cp -rf susfs/kernel_patches/fs/* fs/
-          cp -rf susfs/kernel_patches/include/linux/* include/linux/
+          bash ../Patches/normal_patches.sh || true
+          bash ../Patches/backport_patches.sh || true
 
-      # 打补丁
-      - name: Apply Patches
-        run: |
-          cd kernel
-          bash /tmp/Patches/normal_patches.sh
-          bash /tmp/Patches/backport_patches.sh || true
-
-      # 编译内核（修复 ld.lld 错误！）
-      - name: Build Kernel
+      - name: Build kernel
         run: |
           cd kernel
           mkdir -p out
-          make O=out ARCH=arm64 ${{ env.DEFCONFIG_NAME }}
+          make O=out ARCH=arm64 vendor/star_defconfig
           make -j$(nproc) O=out ARCH=arm64 \
-            CC="clang" \
-            AR="llvm-ar" \
-            NM="llvm-nm" \
-            OBJCOPY="llvm-objcopy" \
-            OBJDUMP="llvm-objdump" \
-            LD="ld.lld" \
-            STRIP="llvm-strip"
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu-
 
-      # 打包 Anykernel3
-      - name: Pack with Anykernel3
+      - name: Make Anykernel3 package
         run: |
-          git clone --depth=1 ${{ env.AK3_SOURCE }} -b ${{ env.AK3_BRANCH }} ak3
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git -b master ak3
           cp kernel/out/arch/arm64/boot/Image.gz ak3/
           cd ak3
-          zip -r9 "Kernel_Star_KSU_SUSFS.zip" ./*
-          mv *.zip ../
+          zip -r9 Kernel_11Ultra_KSU.zip *
 
-      # 上传成品
-      - uses: actions/upload-artifact@v4
+      - name: Upload final kernel
+        uses: actions/upload-artifact@v4
         with:
-          name: Kernel_Final
-          path: "*.zip"
+          name: Xiaomi_11Ultra_KSU_SUSFS
+          path: ak3/*.zip
