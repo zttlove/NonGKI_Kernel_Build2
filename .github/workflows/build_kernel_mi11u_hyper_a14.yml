@@ -64,7 +64,7 @@ jobs:
 
       - name: Install BUILD Dependencies (SPEED UP)
         run: |
-          sudo apt-get install -y -qq git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler p7zip-full python2 python3
+          sudo apt-get install -y -qq git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx1-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler p7zip-full python2 python3
           echo "OK"
 
       - name: Install GCC
@@ -98,7 +98,7 @@ jobs:
           fi
           echo "KERNEL_VERSION=$(head -n 3 device_kernel/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')" >> $GITHUB_ENV
 
-      - name: Set KSU & SUSFS
+      - name: Set KSU & SUSFS Config
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
           echo "CONFIG_KSU=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
@@ -106,20 +106,24 @@ jobs:
             echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
           fi
 
-      - name: Clone KernelSU & SUSFS
+      - name: Clone KernelSU (Clean)
         run: |
-          cd device_kernel
+          cd $GITHUB_WORKSPACE/device_kernel
+          rm -rf KernelSU KernelSU-Next drivers/kernelsu
           git clone --depth=1 ${{ env.KERNELSU_SOURCE }} -b ${{ env.KERNELSU_BRANCH }} ${{ env.KERNELSU_NAME }}
           ln -s ../${{ env.KERNELSU_NAME }}/kernel drivers/kernelsu
-          if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
-            git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-${{ env.KERNEL_VERSION }} susfs4ksu
-            cp -r susfs4ksu/kernel_patches/fs/* fs/
-            cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-          fi
+
+      - name: Clone SUSFS
+        if: env.SUSFS_ENABLE == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-${{ env.KERNEL_VERSION }} susfs4ksu
+          cp -rf susfs4ksu/kernel_patches/fs/* fs/
+          cp -rf susfs4ksu/kernel_patches/include/linux/* include/linux/
 
       - name: Patch Kernel
         run: |
-          cd device_kernel
+          cd $GITHUB_WORKSPACE/device_kernel
           bash /tmp/Patches/normal_patches.sh
           if [[ "${{ env.KERNELSU_NAME }}" != "KernelSU-Next" ]]; then
             bash /tmp/Patches/backport_patches.sh
@@ -128,7 +132,7 @@ jobs:
       - name: Build Kernel
         run: |
           export PATH=$GITHUB_WORKSPACE/clang-custom/bin:$PATH
-          cd device_kernel
+          cd $GITHUB_WORKSPACE/device_kernel
           make CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
           O=out ARCH=arm64 ${{ env.DEFCONFIG_NAME }}
           make -j$(nproc) CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
@@ -136,7 +140,7 @@ jobs:
 
       - name: Make Anykernel3
         run: |
-          cd device_kernel
+          cd $GITHUB_WORKSPACE/device_kernel
           git clone --depth=1 ${{ env.AK3_SOURCE }} -b ${{ env.AK3_BRANCH }} Anykernel3
           cp out/arch/arm64/boot/Image.gz Anykernel3/
           cd Anykernel3
