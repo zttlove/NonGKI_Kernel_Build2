@@ -247,11 +247,11 @@ jobs:
           fi
           if [[ "${{ env.LXC_ENABLE }}" == "true" ]]; then
             cat >> ./arch/arm64/configs/${{ env.DEFCONFIG_NAME }} <<'EOF'
-CONFIG_VIRTUALIZATION=y
-CONFIG_KVM=y
-CONFIG_VHOST_NET=y
-CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y
-EOF
+          CONFIG_VIRTUALIZATION=y
+          CONFIG_KVM=y
+          CONFIG_VHOST_NET=y
+          CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y
+          EOF
           fi
 
       - name: Set Pack Method and KernelSU and SUSFS
